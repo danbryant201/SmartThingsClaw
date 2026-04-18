@@ -8,9 +8,13 @@ version: 1.0.0
 metadata:
   openclaw:
     env:
-      SMARTTHINGS_TOKEN: "smartthings_pat"
-    bins: ["python3"]
-    primaryEnv: SMARTTHINGS_TOKEN
+      SMARTTHINGS_CLIENT_ID: "smartthings_client_id"
+      SMARTTHINGS_CLIENT_SECRET: "smartthings_client_secret"
+      SMARTTHINGS_ACCESS_TOKEN: "smartthings_access_token"
+      SMARTTHINGS_REFRESH_TOKEN: "smartthings_refresh_token"
+      SMARTTHINGS_TOKEN_EXPIRES_AT: "smartthings_token_expires_at"
+    bins: ["python3", "node"]
+    primaryEnv: SMARTTHINGS_ACCESS_TOKEN
 ---
 
 # SmartThings Skill
@@ -31,40 +35,63 @@ by the agent via `python3 scripts/<script>.py`.
 ## First-Run Setup
 
 Run this checklist the **first time** a user asks to do anything with
-SmartThings, or whenever the agent receives a `401 Unauthorized` error.
+SmartThings. SmartThings requires OAuth 2.0 — Personal Access Tokens now
+expire after 24 hours and are not suitable for ongoing use.
 
-### Step 1 — Create a Personal Access Token
+### Step 1 — Register an OAuth App
 
-1. Open **https://account.smartthings.com/tokens** in a browser.
-2. Click **Generate new token**.
-3. Give it a name (e.g. "OpenClaw").
-4. Under **Authorized Scopes**, enable at minimum:
-   - Devices — **List all devices**, **See all devices**
-   - (Recommended for future use) Scenes — **List**, **Execute**
-5. Click **Generate token**.
-6. **Copy the token immediately** — SmartThings only shows it once.
+You need a `client_id` and `client_secret` from a registered SmartThings
+OAuth application. This is a one-time step.
 
-### Step 2 — Store the Token Securely
+1. Install the SmartThings CLI:
+   ```
+   npm install -g @smartthings/cli
+   ```
+2. Authenticate the CLI:
+   ```
+   smartthings login
+   ```
+3. Create an OAuth app:
+   ```
+   smartthings apps:create
+   ```
+   When prompted:
+   - **Redirect URI**: `http://localhost:8080/callback`
+   - **Scopes**: `r:devices:*  x:devices:*  r:locations:*  r:scenes:*  x:scenes:*`
+4. The CLI will display a `client_id` and `client_secret`. **Copy both immediately.**
 
-Add the following line to `~/.openclaw/.env`:
+### Step 2 — Store Client Credentials
+
+Add the following to `~/.openclaw/.env`:
 
 ```
-SMARTTHINGS_TOKEN=your-token-here
+SMARTTHINGS_CLIENT_ID=your-client-id-here
+SMARTTHINGS_CLIENT_SECRET=your-client-secret-here
 ```
 
-OpenClaw injects this as an environment variable at runtime. The token is
-never written to the repository or any file inside the project directory.
+### Step 3 — Authorize and Obtain Tokens
 
-### Step 3 — Verify Setup
+Run the OAuth flow script:
 
-Run:
+```
+python3 scripts/auth.py
+```
+
+This will:
+1. Open the SmartThings authorization page in your browser
+2. Ask you to log in and grant permissions
+3. Automatically capture the callback and exchange for tokens
+4. Save `SMARTTHINGS_ACCESS_TOKEN`, `SMARTTHINGS_REFRESH_TOKEN`, and
+   `SMARTTHINGS_TOKEN_EXPIRES_AT` to `~/.openclaw/.env`
+
+### Step 4 — Verify Setup
 
 ```
 python3 scripts/list_devices.py
 ```
 
 Expected output: a JSON array of devices. An empty array `[]` means the
-account has no devices or the token lacks the required scopes.
+account has no devices or the app lacks the required scopes.
 
 ---
 
@@ -166,6 +193,13 @@ python3 scripts/get_status.py --all
 2. Run `get_status.py --device-id <deviceId>`
 3. Read `status.main.temperatureMeasurement.temperature.value` and `.unit`.
 
+### Handling an expired token (exit code 2)
+
+1. Run `python3 scripts/auth.py --refresh`
+2. Retry the original command.
+3. If `auth.py --refresh` itself exits 2, the refresh token has expired (>30 days).
+   Re-run First-Run Setup (Step 3 only — client credentials do not need to change).
+
 ### "Give me a full status report of everything"
 
 1. Run `python3 scripts/get_status.py --all`
@@ -197,7 +231,7 @@ All scripts print error details to **stderr** and exit with a non-zero code.
 |-----------|----------------------------------------------------------|---------------------------------------------------|
 | `0`       | Success                                                  | —                                                 |
 | `1`       | General error (bad arguments, unexpected exception)      | Report the stderr message to the user             |
-| `2`       | Authentication error (401) — token missing or invalid    | Re-run First-Run Setup with the user              |
+| `2`       | Authentication error (401) — token missing or expired    | Run `python3 scripts/auth.py --refresh`; if that also fails (exit 2), re-run First-Run Setup |
 | `3`       | Not found (404) — device ID does not exist               | Confirm device ID via `list_devices.py`           |
 | `4`       | Rate limited (429)                                       | Wait a few seconds and retry                      |
 | `5`       | SmartThings server error (5xx)                           | Inform user; retry after a short delay            |
@@ -219,10 +253,14 @@ The following are not yet implemented. The architecture in
 
 ## Security Notes
 
-- The PAT grants full access to the associated SmartThings account. Treat it
-  like a password.
-- Scripts read `SMARTTHINGS_TOKEN` from the environment only — the token is
-  never passed as a command-line argument, avoiding shell history exposure.
-- To rotate the token: delete it at **account.smartthings.com/tokens**,
-  generate a new one, and update `~/.openclaw/.env`.
-- Never commit `~/.openclaw/.env` or any file containing the token.
+- `client_secret` and tokens grant access to the associated SmartThings
+  account. Treat them like passwords.
+- All credentials are read from environment variables only — never from
+  command-line arguments, avoiding shell history exposure.
+- **Access tokens** expire after 24 hours. Run `python3 scripts/auth.py --refresh`
+  to renew (the agent will do this automatically when it sees exit code 2).
+- **Refresh tokens** expire after 30 days of non-use. If refresh fails, run
+  `python3 scripts/auth.py` to re-authorize.
+- To revoke access entirely: delete the OAuth app via `smartthings apps:delete`
+  and remove credentials from `~/.openclaw/.env`.
+- Never commit `~/.openclaw/.env` or any file containing credentials.

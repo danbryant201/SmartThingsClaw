@@ -30,11 +30,11 @@ class ServerError(SmartThingsError):
 class SmartThingsClient:
     BASE_URL = "https://api.smartthings.com/v1"
 
-    def __init__(self, token: str | None = None):
-        self._token = token or os.environ.get("SMARTTHINGS_TOKEN")
+    def __init__(self, access_token: str | None = None):
+        self._token = access_token or os.environ.get("SMARTTHINGS_ACCESS_TOKEN")
         if not self._token:
             raise AuthError(
-                "No SmartThings token found. Set SMARTTHINGS_TOKEN in ~/.openclaw/.env"
+                "No access token found. Run: python3 scripts/auth.py to authorize."
             )
 
     def _request(
@@ -70,7 +70,10 @@ class SmartThingsClient:
                 pass
             msg = f"HTTP {e.code}: {body_text or e.reason}"
             if e.code == 401:
-                raise AuthError(msg, e.code) from e
+                raise AuthError(
+                    "Access token expired or invalid. Run: python3 scripts/auth.py --refresh",
+                    e.code,
+                ) from e
             if e.code == 404:
                 raise NotFoundError(msg, e.code) from e
             if e.code == 429:

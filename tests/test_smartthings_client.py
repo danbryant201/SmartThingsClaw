@@ -19,18 +19,18 @@ from smartthings_client import (
 # ── __init__ ────────────────────────────────────────────────────────────────
 
 def test_init_token_from_arg():
-    client = SmartThingsClient("my-token")
-    assert client._token == "my-token"
+    client = SmartThingsClient("my-access-token")
+    assert client._token == "my-access-token"
 
 
 def test_init_token_from_env(monkeypatch):
-    monkeypatch.setenv("SMARTTHINGS_TOKEN", "env-token")
+    monkeypatch.setenv("SMARTTHINGS_ACCESS_TOKEN", "env-access-token")
     client = SmartThingsClient()
-    assert client._token == "env-token"
+    assert client._token == "env-access-token"
 
 
 def test_init_no_token_raises(monkeypatch):
-    monkeypatch.delenv("SMARTTHINGS_TOKEN", raising=False)
+    monkeypatch.delenv("SMARTTHINGS_ACCESS_TOKEN", raising=False)
     with pytest.raises(AuthError):
         SmartThingsClient()
 
@@ -55,7 +55,7 @@ def test_request_authorization_header(st_client, mock_urlopen):
     mock_urlopen.return_value = mock_response({})
     st_client._request("GET", "/devices")
     req = mock_urlopen.call_args[0][0]
-    assert req.get_header("Authorization") == "Bearer test-token"
+    assert req.get_header("Authorization") == "Bearer test-access-token"
 
 
 def test_request_json_body_serialized(st_client, mock_urlopen):

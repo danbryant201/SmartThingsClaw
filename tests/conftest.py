@@ -18,7 +18,16 @@ def mock_response(data: dict | list) -> MagicMock:
 
 @pytest.fixture
 def fake_token(monkeypatch):
-    monkeypatch.setenv("SMARTTHINGS_TOKEN", "test-token")
+    monkeypatch.setenv("SMARTTHINGS_ACCESS_TOKEN", "test-access-token")
+
+
+@pytest.fixture
+def fake_oauth_env(monkeypatch):
+    monkeypatch.setenv("SMARTTHINGS_CLIENT_ID", "test-client-id")
+    monkeypatch.setenv("SMARTTHINGS_CLIENT_SECRET", "test-client-secret")
+    monkeypatch.setenv("SMARTTHINGS_ACCESS_TOKEN", "test-access-token")
+    monkeypatch.setenv("SMARTTHINGS_REFRESH_TOKEN", "test-refresh-token")
+    monkeypatch.setenv("SMARTTHINGS_TOKEN_EXPIRES_AT", "9999999999")
 
 
 @pytest.fixture
@@ -29,7 +38,7 @@ def mock_urlopen():
 
 @pytest.fixture
 def st_client():
-    return SmartThingsClient("test-token")
+    return SmartThingsClient("test-access-token")
 
 
 @pytest.fixture

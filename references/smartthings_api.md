@@ -1,8 +1,50 @@
 # SmartThings API Quick Reference
 
 **Base URL:** `https://api.smartthings.com/v1`  
-**Auth:** `Authorization: Bearer <PAT>`  
+**Auth:** `Authorization: Bearer <SMARTTHINGS_ACCESS_TOKEN>`  
 **Content-Type:** `application/json`
+
+---
+
+## Authentication (OAuth 2.0)
+
+SmartThings uses Authorization Code Flow. Personal Access Tokens expire after
+24 hours and are unsuitable for production.
+
+| | |
+|-|-|
+| Authorization URL | `https://api.smartthings.com/oauth/authorize` |
+| Token URL | `https://api.smartthings.com/oauth/token` |
+| Token auth | HTTP Basic — `Authorization: Basic base64(client_id:client_secret)` |
+| Access token lifetime | 24 hours |
+| Refresh token lifetime | 30 days |
+
+**Token request body** (`application/x-www-form-urlencoded`):
+
+```
+# Exchange authorization code
+grant_type=authorization_code&code=<code>&redirect_uri=<uri>
+
+# Refresh
+grant_type=refresh_token&refresh_token=<token>
+```
+
+**Token response:**
+```json
+{
+  "access_token": "...",
+  "refresh_token": "...",
+  "expires_in": 86400,
+  "scope": "r:devices:* x:devices:* ..."
+}
+```
+
+**App registration** (one-time, via SmartThings CLI):
+```
+npm install -g @smartthings/cli
+smartthings login
+smartthings apps:create   # set redirect URI to http://localhost:8080/callback
+```
 
 ---
 
