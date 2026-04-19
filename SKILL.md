@@ -21,8 +21,8 @@ metadata:
 
 ## Overview
 
-This skill connects to the Samsung SmartThings cloud API using a Personal
-Access Token (PAT). It lets you:
+This skill connects to the Samsung SmartThings cloud API using OAuth 2.0.
+It lets you:
 
 - List every device on the account with its components and capabilities
 - Retrieve the current status of any device or all devices at once
@@ -32,66 +32,82 @@ by the agent via `python3 scripts/<script>.py`.
 
 ---
 
-## First-Run Setup
+## Setup Flow (Agent-Driven)
 
-Run this checklist the **first time** a user asks to do anything with
-SmartThings. SmartThings requires OAuth 2.0 — Personal Access Tokens now
-expire after 24 hours and are not suitable for ongoing use.
+When the user asks to connect SmartThings, or any command returns exit code 2
+with no refresh token stored, follow this flow. No CLI tools are required —
+everything happens through chat.
 
-### Step 1 — Register an OAuth App
-
-You need a `client_id` and `client_secret` from a registered SmartThings
-OAuth application. This is a one-time step.
-
-1. Install the SmartThings CLI:
-   ```
-   npm install -g @smartthings/cli
-   ```
-2. Authenticate the CLI:
-   ```
-   smartthings login
-   ```
-3. Create an OAuth app:
-   ```
-   smartthings apps:create
-   ```
-   When prompted:
-   - **Redirect URI**: `http://localhost:8080/callback`
-   - **Scopes**: `r:devices:*  x:devices:*  r:locations:*  r:scenes:*  x:scenes:*`
-4. The CLI will display a `client_id` and `client_secret`. **Copy both immediately.**
-
-### Step 2 — Store Client Credentials
-
-Add the following to `~/.openclaw/.env`:
+### Step A — Check State
 
 ```
-SMARTTHINGS_CLIENT_ID=your-client-id-here
-SMARTTHINGS_CLIENT_SECRET=your-client-secret-here
+python3 scripts/setup.py check
 ```
 
-### Step 3 — Authorize and Obtain Tokens
+Read `next_step` from the JSON output and jump to the matching step below.
+If `next_step` is `"ready"`, skip to Step D to verify.
 
-Run the OAuth flow script:
+### Step B — Register an App (`next_step == "register_app"`)
+
+Tell the user:
+
+> "I need to register a SmartThings OAuth app — this only needs to be done once, and I'll handle
+> most of it automatically. I just need a short-lived Personal Access Token (PAT) from you.
+>
+> 1. Open **account.smartthings.com/tokens** in any browser and sign in with your Samsung account.
+> 2. Click **Generate new token**, give it any name (e.g. "OpenClaw setup"), leave all scopes
+>    unchecked (none are needed for app registration), and click **Generate**.
+> 3. Copy the token that appears (it's only shown once) and paste it here."
+
+Once the user provides the PAT, run:
+
+```
+python3 scripts/setup.py register-app --pat <PAT>
+```
+
+This will:
+- Install the SmartThings CLI if not already present (`npm install -g @smartthings/cli`)
+- Create the OAuth app with the correct redirect URI and scopes
+- Save the Client ID and Client Secret automatically
+
+On success the command prints `{"status": "ok", "client_id": "..."}`. Then continue to Step C.
+
+### Step C — Authorize (`next_step == "authorize"`, or after Step B)
+
+Tell the user:
+
+> "I'll open the SmartThings authorization page now. If your browser opens automatically,
+> log in and click **Allow** — I'll capture the result and finish setup for you.
+>
+> If you're messaging from a different device (phone, tablet), that's fine too: just open
+> the URL I'm about to give you in any browser, authorize, and then copy the full address
+> bar URL (even if the page fails to load) and paste it back here."
+
+Run:
 
 ```
 python3 scripts/auth.py
 ```
 
-This will:
-1. Open the SmartThings authorization page in your browser
-2. Ask you to log in and grant permissions
-3. Automatically capture the callback and exchange for tokens
-4. Save `SMARTTHINGS_ACCESS_TOKEN`, `SMARTTHINGS_REFRESH_TOKEN`, and
-   `SMARTTHINGS_TOKEN_EXPIRES_AT` to `~/.openclaw/.env`
+The script prints `AUTHORIZATION_URL: <url>` on the first line — relay that URL to the user.
 
-### Step 4 — Verify Setup
+- **Exit 0** → tokens saved automatically. Proceed to Step D.
+- **Exit 3** (`AWAITING_MANUAL_CODE`) → The local callback timed out (user authorized on a
+  different device). Ask the user to paste the full address bar URL. Extract the `code=`
+  value from it and run:
+  ```
+  python3 scripts/auth.py --exchange-code "<pasted_url_or_code>"
+  ```
+  The `--exchange-code` flag accepts either the full callback URL or just the bare code.
+
+### Step D — Verify
 
 ```
 python3 scripts/list_devices.py
 ```
 
-Expected output: a JSON array of devices. An empty array `[]` means the
-account has no devices or the app lacks the required scopes.
+If it returns a JSON array (even `[]`), tell the user setup is complete. An empty array
+means the account has no devices or the OAuth app is missing scopes.
 
 ---
 

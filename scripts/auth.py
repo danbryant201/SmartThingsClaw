@@ -2,8 +2,9 @@
 OAuth 2.0 Authorization Code Flow for SmartThings.
 
 Usage:
-    python3 scripts/auth.py           # Start interactive OAuth flow (first-time setup)
-    python3 scripts/auth.py --refresh # Refresh using stored refresh token
+    python3 scripts/auth.py                    # Interactive OAuth flow (first-time setup)
+    python3 scripts/auth.py --refresh          # Refresh using stored refresh token
+    python3 scripts/auth.py --exchange-code C  # Exchange a manually provided auth code
 """
 
 import argparse
@@ -24,6 +25,7 @@ REDIRECT_PORT = 8080
 REDIRECT_URI = f"http://localhost:{REDIRECT_PORT}/callback"
 DEFAULT_SCOPES = "r:devices:* x:devices:* r:locations:* r:scenes:* x:scenes:*"
 ENV_FILE = os.path.expanduser("~/.openclaw/.env")
+CALLBACK_TIMEOUT = 60
 
 
 def build_auth_url(client_id: str, scopes: str = DEFAULT_SCOPES) -> str:
@@ -81,14 +83,8 @@ def refresh_access_token(client_id: str, client_secret: str, refresh_token: str)
     return tokens
 
 
-def save_tokens(tokens: dict, env_path: str = ENV_FILE) -> None:
-    """Write/update token values in the OpenClaw env file."""
-    updates = {
-        "SMARTTHINGS_ACCESS_TOKEN": tokens.get("access_token", ""),
-        "SMARTTHINGS_REFRESH_TOKEN": tokens.get("refresh_token", ""),
-        "SMARTTHINGS_TOKEN_EXPIRES_AT": str(tokens.get("expires_at", "")),
-    }
-
+def _update_env_file(updates: dict, env_path: str = ENV_FILE) -> None:
+    """Write/update key=value pairs in an env file, preserving other lines."""
     os.makedirs(os.path.dirname(os.path.abspath(env_path)), exist_ok=True)
     try:
         with open(env_path) as f:
@@ -113,8 +109,34 @@ def save_tokens(tokens: dict, env_path: str = ENV_FILE) -> None:
         f.writelines(new_lines)
 
 
-def _wait_for_callback() -> str:
-    """Start a local HTTP server and block until the OAuth callback arrives."""
+def save_tokens(tokens: dict, env_path: str = ENV_FILE) -> None:
+    """Write/update token values in the OpenClaw env file."""
+    _update_env_file(
+        {
+            "SMARTTHINGS_ACCESS_TOKEN": tokens.get("access_token", ""),
+            "SMARTTHINGS_REFRESH_TOKEN": tokens.get("refresh_token", ""),
+            "SMARTTHINGS_TOKEN_EXPIRES_AT": str(tokens.get("expires_at", "")),
+        },
+        env_path,
+    )
+
+
+def save_credentials(client_id: str, client_secret: str, env_path: str = ENV_FILE) -> None:
+    """Write/update OAuth client credentials in the OpenClaw env file."""
+    _update_env_file(
+        {
+            "SMARTTHINGS_CLIENT_ID": client_id,
+            "SMARTTHINGS_CLIENT_SECRET": client_secret,
+        },
+        env_path,
+    )
+
+
+def _wait_for_callback(timeout: int = CALLBACK_TIMEOUT) -> str | None:
+    """Start a local HTTP server and wait for the OAuth callback.
+
+    Returns the auth code on success, or None on timeout.
+    """
     auth_code: list[str] = []
 
     class _Handler(http.server.BaseHTTPRequestHandler):
@@ -126,7 +148,7 @@ def _wait_for_callback() -> str:
                 self.end_headers()
                 self.wfile.write(
                     b"<html><body><h2>Authorization successful!</h2>"
-                    b"<p>You can close this tab and return to the terminal.</p>"
+                    b"<p>You can close this tab and return to the chat.</p>"
                     b"</body></html>"
                 )
             else:
@@ -138,47 +160,75 @@ def _wait_for_callback() -> str:
             pass
 
     server = http.server.HTTPServer(("localhost", REDIRECT_PORT), _Handler)
-    server.timeout = 120
-    print(f"Waiting for callback on http://localhost:{REDIRECT_PORT}/callback (timeout: 120s)...")
+    server.timeout = timeout
     server.handle_request()
-
-    if not auth_code:
-        raise RuntimeError("Authorization failed: no code received in callback.")
-    return auth_code[0]
+    return auth_code[0] if auth_code else None
 
 
 def run_auth_flow() -> None:
-    """Interactive first-time OAuth flow: open browser, capture callback, save tokens."""
+    """Interactive OAuth flow. Handles both local browser and cross-device cases."""
     client_id = os.environ.get("SMARTTHINGS_CLIENT_ID", "")
     client_secret = os.environ.get("SMARTTHINGS_CLIENT_SECRET", "")
 
     if not client_id or not client_secret:
         print(
-            "ERROR: SMARTTHINGS_CLIENT_ID and SMARTTHINGS_CLIENT_SECRET must be set "
-            "in ~/.openclaw/.env before running this script.",
+            "ERROR: SMARTTHINGS_CLIENT_ID and SMARTTHINGS_CLIENT_SECRET are not set.\n"
+            "Ask the agent to run setup first, or see SKILL.md for instructions.",
             file=sys.stderr,
         )
-        print("\nTo register an OAuth app:", file=sys.stderr)
-        print("  1. Install the SmartThings CLI:  npm install -g @smartthings/cli", file=sys.stderr)
-        print("  2. Authenticate:                  smartthings login", file=sys.stderr)
-        print("  3. Create the app:                smartthings apps:create", file=sys.stderr)
-        print("     - Set redirect URI to:         http://localhost:8080/callback", file=sys.stderr)
-        print("  4. Copy client_id and client_secret into ~/.openclaw/.env", file=sys.stderr)
         sys.exit(1)
 
     auth_url = build_auth_url(client_id)
-    print("\nOpening SmartThings authorization page in your browser...")
-    print(f"If it does not open automatically, visit:\n  {auth_url}\n")
-    webbrowser.open(auth_url)
 
+    # Print URL immediately so the agent can relay it to the user regardless of browser.
+    print(f"AUTHORIZATION_URL: {auth_url}")
+    print(
+        f"\nOpening browser... if it does not open, visit the URL above on any device.\n"
+        f"After authorizing, your browser will redirect to localhost — that page may not\n"
+        f"load if you're on a different device. That's fine: just copy the full address\n"
+        f"bar URL and paste it back in the chat.\n"
+    )
+
+    webbrowser.open(auth_url)
     code = _wait_for_callback()
+
+    if code is None:
+        print(
+            "AWAITING_MANUAL_CODE: Browser callback not received within "
+            f"{CALLBACK_TIMEOUT}s.\n"
+            "Paste the full callback URL (or just the 'code=' value) from your browser.",
+            file=sys.stderr,
+        )
+        sys.exit(3)
+
     print("Code received. Exchanging for tokens...")
     tokens = exchange_code(client_id, client_secret, code)
     save_tokens(tokens)
 
     hours = tokens.get("expires_in", 86400) // 3600
-    print(f"Done. Access token saved (expires in {hours}h).")
-    print("Tokens are stored in ~/.openclaw/.env")
+    print(f"Done. Access token saved (expires in {hours}h). Tokens stored in ~/.openclaw/.env")
+
+
+def run_exchange_code(code: str) -> None:
+    """Exchange a manually provided authorization code for tokens."""
+    # Strip a full callback URL down to just the code value if needed.
+    if "code=" in code:
+        parsed = urllib.parse.urlparse(code)
+        params = urllib.parse.parse_qs(parsed.query)
+        code = params.get("code", [code])[0]
+
+    client_id = os.environ.get("SMARTTHINGS_CLIENT_ID", "")
+    client_secret = os.environ.get("SMARTTHINGS_CLIENT_SECRET", "")
+
+    if not client_id or not client_secret:
+        print("ERROR: SMARTTHINGS_CLIENT_ID and SMARTTHINGS_CLIENT_SECRET not set.", file=sys.stderr)
+        sys.exit(1)
+
+    tokens = exchange_code(client_id, client_secret, code)
+    save_tokens(tokens)
+
+    hours = tokens.get("expires_in", 86400) // 3600
+    print(f"Done. Access token saved (expires in {hours}h). Tokens stored in ~/.openclaw/.env")
 
 
 def run_refresh() -> None:
@@ -217,13 +267,22 @@ def run_refresh() -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="SmartThings OAuth authentication")
-    parser.add_argument(
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument(
         "--refresh",
         action="store_true",
         help="Refresh tokens using the stored refresh token (non-interactive)",
     )
+    group.add_argument(
+        "--exchange-code",
+        metavar="CODE",
+        help="Exchange a manually provided authorization code (or full callback URL) for tokens",
+    )
     args = parser.parse_args()
+
     if args.refresh:
         run_refresh()
+    elif args.exchange_code:
+        run_exchange_code(args.exchange_code)
     else:
         run_auth_flow()

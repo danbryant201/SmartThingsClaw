@@ -13,7 +13,9 @@ from auth import (
     build_auth_url,
     exchange_code,
     refresh_access_token,
+    run_exchange_code,
     run_refresh,
+    save_credentials,
     save_tokens,
 )
 from conftest import mock_response
@@ -235,3 +237,70 @@ def test_run_refresh_saves_tokens_on_success(monkeypatch, tmp_path):
     mock_save.assert_called_once()
     saved = mock_save.call_args[0][0]
     assert saved["access_token"] == "new-access"
+
+
+# ── save_credentials ─────────────────────────────────────────────────────────
+
+def test_save_credentials_creates_file(tmp_path):
+    env_file = tmp_path / ".env"
+    save_credentials("my-client-id", "my-secret", env_path=str(env_file))
+    content = env_file.read_text()
+    assert "SMARTTHINGS_CLIENT_ID=my-client-id" in content
+    assert "SMARTTHINGS_CLIENT_SECRET=my-secret" in content
+
+
+def test_save_credentials_updates_existing(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("SMARTTHINGS_CLIENT_ID=old-id\nOTHER=keep\n")
+    save_credentials("new-id", "new-secret", env_path=str(env_file))
+    content = env_file.read_text()
+    assert "SMARTTHINGS_CLIENT_ID=new-id" in content
+    assert "SMARTTHINGS_CLIENT_ID=old-id" not in content
+    assert "OTHER=keep" in content
+
+
+def test_save_credentials_preserves_token_lines(tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text("SMARTTHINGS_ACCESS_TOKEN=tok\nSMARTTHINGS_REFRESH_TOKEN=ref\n")
+    save_credentials("cid", "csecret", env_path=str(env_file))
+    content = env_file.read_text()
+    assert "SMARTTHINGS_ACCESS_TOKEN=tok" in content
+    assert "SMARTTHINGS_REFRESH_TOKEN=ref" in content
+
+
+# ── run_exchange_code ─────────────────────────────────────────────────────────
+
+def test_run_exchange_code_bare_code(monkeypatch):
+    monkeypatch.setenv("SMARTTHINGS_CLIENT_ID", "cid")
+    monkeypatch.setenv("SMARTTHINGS_CLIENT_SECRET", "csecret")
+    with patch("auth.urllib.request.urlopen", return_value=mock_response(_token_response())):
+        with patch("auth.save_tokens") as mock_save:
+            run_exchange_code("my-auth-code")
+    mock_save.assert_called_once()
+    assert mock_save.call_args[0][0]["access_token"] == "new-access"
+
+
+def test_run_exchange_code_full_url(monkeypatch):
+    monkeypatch.setenv("SMARTTHINGS_CLIENT_ID", "cid")
+    monkeypatch.setenv("SMARTTHINGS_CLIENT_SECRET", "csecret")
+    callback_url = "http://localhost:8080/callback?code=extracted-code&state=xyz"
+    captured = []
+
+    def capture(req):
+        captured.append(req)
+        return mock_response(_token_response())
+
+    with patch("auth.urllib.request.urlopen", side_effect=capture):
+        with patch("auth.save_tokens"):
+            run_exchange_code(callback_url)
+
+    body = captured[0].data.decode()
+    assert "code=extracted-code" in body
+
+
+def test_run_exchange_code_exits_1_without_client_id(monkeypatch):
+    monkeypatch.delenv("SMARTTHINGS_CLIENT_ID", raising=False)
+    monkeypatch.delenv("SMARTTHINGS_CLIENT_SECRET", raising=False)
+    with pytest.raises(SystemExit) as exc_info:
+        run_exchange_code("some-code")
+    assert exc_info.value.code == 1
