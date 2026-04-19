@@ -22,7 +22,7 @@ import webbrowser
 AUTH_URL = "https://api.smartthings.com/oauth/authorize"
 TOKEN_URL = "https://api.smartthings.com/oauth/token"
 REDIRECT_PORT = 8080
-REDIRECT_URI = f"http://localhost:{REDIRECT_PORT}/callback"
+REDIRECT_URI = f"http://127.0.0.1:{REDIRECT_PORT}/callback"
 DEFAULT_SCOPES = "r:devices:* x:devices:* r:locations:* r:scenes:* x:scenes:*"
 ENV_FILE = os.path.expanduser("~/.openclaw/.env")
 CALLBACK_TIMEOUT = 60
@@ -159,7 +159,7 @@ def _wait_for_callback(timeout: int = CALLBACK_TIMEOUT) -> str | None:
         def log_message(self, *args):
             pass
 
-    server = http.server.HTTPServer(("localhost", REDIRECT_PORT), _Handler)
+    server = http.server.HTTPServer(("127.0.0.1", REDIRECT_PORT), _Handler)
     server.timeout = timeout
     server.handle_request()
     return auth_code[0] if auth_code else None

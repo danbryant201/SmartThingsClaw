@@ -107,9 +107,22 @@ class SmartThingsClient:
     def get_device_status(self, device_id: str) -> dict:
         return self._request("GET", f"/devices/{device_id}/status")
 
-    # ── Future methods (not yet implemented) ────────────────────────────
-    # def send_command(self, device_id, component, capability, command, arguments=None): ...
-    # def list_scenes(self): ...
-    # def execute_scene(self, scene_id): ...
-    # def list_rules(self): ...
-    # def list_subscriptions(self, installed_app_id): ...
+    def send_command(
+        self,
+        device_id: str,
+        capability: str,
+        command: str,
+        arguments: list | None = None,
+        component: str = "main",
+    ) -> dict:
+        body = {
+            "commands": [
+                {
+                    "component": component,
+                    "capability": capability,
+                    "command": command,
+                    "arguments": arguments or [],
+                }
+            ]
+        }
+        return self._request("POST", f"/devices/{device_id}/commands", body=body)

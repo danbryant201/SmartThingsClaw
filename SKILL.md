@@ -1,9 +1,9 @@
 ---
 name: smartthings
 description: >
-  Monitor Samsung SmartThings devices. List connected devices with their
-  components and capabilities, and retrieve live status. Future versions will
-  add device control, scenes, automations, and event subscriptions.
+  Monitor and control Samsung SmartThings devices. List connected devices,
+  retrieve live status, and send commands (switch on/off, set brightness,
+  lock/unlock, set temperature, and any other capability command).
 version: 1.0.0
 metadata:
   openclaw:
@@ -26,6 +26,7 @@ It lets you:
 
 - List every device on the account with its components and capabilities
 - Retrieve the current status of any device or all devices at once
+- Send commands to any device (on/off, brightness, lock/unlock, temperature, etc.)
 
 Scripts live in `scripts/` relative to this skill and are invoked directly
 by the agent via `python3 scripts/<script>.py`.
@@ -49,14 +50,18 @@ If `next_step` is `"ready"`, skip to Step D to verify.
 
 ### Step B — Register an App (`next_step == "register_app"`)
 
+> **Note:** The SmartThings Developer Console (developer.smartthings.com/console) is for hardware
+> device certification only — it cannot create OAuth-In apps. App registration must go through
+> the SmartThings CLI.
+
 Tell the user:
 
 > "I need to register a SmartThings OAuth app — this only needs to be done once, and I'll handle
 > most of it automatically. I just need a short-lived Personal Access Token (PAT) from you.
 >
 > 1. Open **account.smartthings.com/tokens** in any browser and sign in with your Samsung account.
-> 2. Click **Generate new token**, give it any name (e.g. "OpenClaw setup"), leave all scopes
->    unchecked (none are needed for app registration), and click **Generate**.
+> 2. Click **Generate new token**, give it any name (e.g. "OpenClaw setup"). Under
+>    **Applications**, check **See all apps** and **Manage all apps**. Then click **Generate**.
 > 3. Copy the token that appears (it's only shown once) and paste it here."
 
 Once the user provides the PAT, run:
@@ -67,8 +72,11 @@ python3 scripts/setup.py register-app --pat <PAT>
 
 This will:
 - Install the SmartThings CLI if not already present (`npm install -g @smartthings/cli`)
-- Create the OAuth app with the correct redirect URI and scopes
+- Create the OAuth app with redirect URI `http://127.0.0.1:8080/callback` and the required scopes
 - Save the Client ID and Client Secret automatically
+
+> **Important:** The redirect URI is `http://127.0.0.1:8080/callback` (not `localhost`).
+> SmartThings has a known issue with the hostname "localhost" in redirect URIs.
 
 On success the command prints `{"status": "ok", "client_id": "..."}`. Then continue to Step C.
 
@@ -176,6 +184,41 @@ python3 scripts/get_status.py --all
 
 `--all` returns a JSON array of the above shape.
 
+### Send Device Command
+
+Sends a command to a specific device capability.
+
+```
+python3 scripts/send_command.py --device-id <deviceId> --capability <cap> --command <cmd>
+python3 scripts/send_command.py --device-id <deviceId> --capability <cap> --command <cmd> --args '<json_array>'
+```
+
+**Common examples:**
+
+```bash
+# Turn a switch on or off
+python3 scripts/send_command.py --device-id abc-123 --capability switch --command on
+python3 scripts/send_command.py --device-id abc-123 --capability switch --command off
+
+# Set brightness (0–100)
+python3 scripts/send_command.py --device-id abc-123 --capability switchLevel --command setLevel --args '[75]'
+
+# Lock or unlock
+python3 scripts/send_command.py --device-id abc-123 --capability lock --command lock
+python3 scripts/send_command.py --device-id abc-123 --capability lock --command unlock
+
+# Set thermostat cooling setpoint (degrees)
+python3 scripts/send_command.py --device-id abc-123 --capability thermostatCoolingSetpoint --command setCoolingSetpoint --args '[22]'
+```
+
+**Output format** (JSON to stdout — SmartThings API acknowledgement):
+
+```json
+{ "results": [{ "id": "main/switch/on", "status": "ACCEPTED" }] }
+```
+
+Exit 0 means the command was accepted by SmartThings. The device carries it out asynchronously.
+
 ---
 
 ## Agent Workflow Guidance
@@ -208,6 +251,18 @@ python3 scripts/get_status.py --all
    whose label matches the user's description.
 2. Run `get_status.py --device-id <deviceId>`
 3. Read `status.main.temperatureMeasurement.temperature.value` and `.unit`.
+
+### "Turn off the living room light" / "Set the thermostat to 21 degrees" / control requests
+
+1. If you do not have the device ID, run `list_devices.py` first.
+2. Match the user's description to a device label. Note its `deviceId` and which capabilities it has.
+3. Map the user's intent to a capability and command:
+   - Switch on/off → capability `switch`, command `on` or `off`
+   - Dim/brighten → capability `switchLevel`, command `setLevel`, args `[<0-100>]`
+   - Lock/unlock → capability `lock`, command `lock` or `unlock`
+   - Set temperature → capability `thermostatCoolingSetpoint` or `thermostatHeatingSetpoint`, command `setCoolingSetpoint`/`setHeatingSetpoint`, args `[<degrees>]`
+4. Run `send_command.py` with the resolved parameters.
+5. Confirm to the user that the command was sent.
 
 ### Handling an expired token (exit code 2)
 
@@ -259,7 +314,6 @@ All scripts print error details to **stderr** and exit with a non-zero code.
 The following are not yet implemented. The architecture in
 `scripts/smartthings_client.py` is designed to support them cleanly:
 
-- `scripts/send_command.py` — turn devices on/off, set levels, lock/unlock
 - `scripts/list_scenes.py` — list available scenes
 - `scripts/execute_scene.py` — execute a scene by ID
 - `scripts/list_rules.py` / `scripts/create_rule.py` — manage automation rules

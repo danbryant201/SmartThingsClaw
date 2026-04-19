@@ -84,7 +84,7 @@ def register_app(pat: str, name: str = "OpenClaw", env_path: str = ENV_FILE) -> 
                 "r:scenes:*",
                 "x:scenes:*",
             ],
-            "redirectUris": ["http://localhost:8080/callback"],
+            "redirectUris": ["http://127.0.0.1:8080/callback"],
         },
     }
 
