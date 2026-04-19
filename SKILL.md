@@ -82,31 +82,45 @@ On success the command prints `{"status": "ok", "client_id": "..."}`. Then conti
 
 ### Step C — Authorize (`next_step == "authorize"`, or after Step B)
 
-Tell the user:
+> ⚠️ **Critical guardrails — read before running anything:**
+> - **Never** call the authorization URL with WebFetch or any automated tool.
+>   It must be opened in the user's real browser.
+> - **Never** try to exchange the code yourself — always pass it to `--exchange-code`.
+> - The code is **single-use**. Consuming it twice (e.g. callback server + manual exchange)
+>   causes `invalid_grant` errors. Follow the two steps below exactly.
 
-> "I'll open the SmartThings authorization page now. If your browser opens automatically,
-> log in and click **Allow** — I'll capture the result and finish setup for you.
->
-> If you're messaging from a different device (phone, tablet), that's fine too: just open
-> the URL I'm about to give you in any browser, authorize, and then copy the full address
-> bar URL (even if the page fails to load) and paste it back here."
+#### Step C.1 — Get the authorization URL
 
 Run:
 
 ```
-python3 scripts/auth.py
+python3 scripts/auth.py --get-url
 ```
 
-The script prints `AUTHORIZATION_URL: <url>` on the first line — relay that URL to the user.
+Copy the full URL printed after `AUTHORIZATION_URL:` and relay it to the user:
 
-- **Exit 0** → tokens saved automatically. Proceed to Step D.
-- **Exit 3** (`AWAITING_MANUAL_CODE`) → The local callback timed out (user authorized on a
-  different device). Ask the user to paste the full address bar URL. Extract the `code=`
-  value from it and run:
-  ```
-  python3 scripts/auth.py --exchange-code "<pasted_url_or_code>"
-  ```
-  The `--exchange-code` flag accepts either the full callback URL or just the bare code.
+> "Please open this URL in your browser and sign in with your Samsung account, then click
+> **Allow**:
+>
+> `<URL>`
+>
+> After authorizing, your browser will try to redirect to `127.0.0.1:8080` — that page
+> will likely fail to load. That's fine. Just copy the full address bar URL (it will look
+> like `http://127.0.0.1:8080/callback?code=...`) and paste it back here."
+
+Wait for the user to paste the callback URL before proceeding. Do **not** run Step C.2
+in the same turn as Step C.1.
+
+#### Step C.2 — Exchange the code
+
+When the user pastes the callback URL (or just the bare code value), run:
+
+```
+python3 scripts/auth.py --exchange-code "<paste exactly what the user provided>"
+```
+
+`--exchange-code` accepts both the full callback URL and a bare code value.
+Exit 0 means tokens are saved. Proceed to Step D.
 
 ### Step D — Verify
 
@@ -303,7 +317,7 @@ All scripts print error details to **stderr** and exit with a non-zero code.
 | `0`       | Success                                                  | —                                                 |
 | `1`       | General error (bad arguments, unexpected exception)      | Report the stderr message to the user             |
 | `2`       | Authentication error (401) — token missing or expired    | Run `python3 scripts/auth.py --refresh`; if that also fails (exit 2), re-run First-Run Setup |
-| `3`       | Not found (404) — device ID does not exist               | Confirm device ID via `list_devices.py`           |
+| `3`       | Not found (404) — device ID does not exist (device scripts only; `auth.py` uses 3 as a legacy fallback, not reachable via SKILL.md flow) | Confirm device ID via `list_devices.py` |
 | `4`       | Rate limited (429)                                       | Wait a few seconds and retry                      |
 | `5`       | SmartThings server error (5xx)                           | Inform user; retry after a short delay            |
 

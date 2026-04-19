@@ -19,7 +19,7 @@ import urllib.parse
 import urllib.request
 import webbrowser
 
-AUTH_URL = "https://api.smartthings.com/oauth/authorize"
+AUTH_URL = "https://oauthin-regional.api.smartthings.com/oauth/authorize"
 TOKEN_URL = "https://api.smartthings.com/oauth/token"
 REDIRECT_PORT = 8080
 REDIRECT_URI = f"http://127.0.0.1:{REDIRECT_PORT}/callback"
@@ -278,11 +278,22 @@ if __name__ == "__main__":
         metavar="CODE",
         help="Exchange a manually provided authorization code (or full callback URL) for tokens",
     )
+    group.add_argument(
+        "--get-url",
+        action="store_true",
+        help="Print the authorization URL and exit (no browser, no callback server)",
+    )
     args = parser.parse_args()
 
     if args.refresh:
         run_refresh()
     elif args.exchange_code:
         run_exchange_code(args.exchange_code)
+    elif args.get_url:
+        client_id = os.environ.get("SMARTTHINGS_CLIENT_ID", "")
+        if not client_id:
+            print("ERROR: SMARTTHINGS_CLIENT_ID is not set.", file=sys.stderr)
+            sys.exit(1)
+        print(f"AUTHORIZATION_URL: {build_auth_url(client_id)}")
     else:
         run_auth_flow()
